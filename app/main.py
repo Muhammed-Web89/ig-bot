@@ -15,6 +15,8 @@ app = FastAPI(title="Instagram Auto DM")
 
 def verify_signature(payload: bytes, signature: str) -> bool:
     """X-Hub-Signature-256 basligini dogrular."""
+    print(f"Gelen Imza: {signature}")
+    print(f"Okunan Sifre Uzunlugu: {len(settings.meta_app_secret) if settings.meta_app_secret else 'BOS!'}")
     if not signature.startswith("sha256="):
         return False
     expected = signature.split("=")[1]
