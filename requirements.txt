@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+httpx
+arq
+redis
+pydantic-settings
+tenacity
+python-dotenv
+structlog
