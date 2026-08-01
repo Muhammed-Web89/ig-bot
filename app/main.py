@@ -28,6 +28,8 @@ def verify_signature(payload: bytes, signature: str) -> bool:
 
 @app.on_event("startup")
 async def startup():
+    if not settings.redis_url:
+        raise RuntimeError("REDIS_URL is required for webhook queue processing")
     app.state.redis = await create_pool(
         RedisSettings.from_dsn(settings.redis_url)
     )
@@ -36,7 +38,9 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    await app.state.redis.close()
+    redis = getattr(app.state, "redis", None)
+    if redis is not None:
+        await redis.close()
 
 
 @app.get("/webhook/instagram")

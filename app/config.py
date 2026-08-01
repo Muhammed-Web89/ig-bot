@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     instagram_account_id: str
     verify_token: str
 
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str | None = None
 
     min_delay_seconds: int = 20
     max_delay_seconds: int = 50

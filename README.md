@@ -53,6 +53,25 @@ ngrok http 8000
 
 Sonra `https://sizin-adresiniz.ngrok.io/webhook/instagram` adresini Meta for Developers üzerinden webhook olarak kaydedin.
 
+## Vercel Deployment
+
+Vercel kullanacaksaniz:
+
+1. Repo'yu Vercel'e import edin.
+2. Vercel project settings icinde su environment variables'lari tanimlayin:
+
+```text
+META_APP_SECRET
+META_PAGE_ACCESS_TOKEN
+META_PAGE_ID
+INSTAGRAM_ACCOUNT_ID
+VERIFY_TOKEN
+REDIS_URL
+```
+
+3. `REDIS_URL` icin Redis Cloud, Upstash veya benzeri bir dis servis kullanin. `redis://localhost:6379/0` Vercel icin uygun degildir.
+4. Deploy sonrasi webhook adresi olarak uygulamanin root domain'ini kullanin; `vercel.json` tum rotalari FastAPI uygulamasina yonlendirir.
+
 ## Yapilandirma
 
 `.env` icerisinde ayarlanabilir anahtarlar:

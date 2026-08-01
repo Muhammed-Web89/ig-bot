@@ -13,6 +13,12 @@ from app.models import DMJob
 logger = structlog.get_logger()
 
 
+def require_redis_settings() -> RedisSettings:
+    if not settings.redis_url:
+        raise RuntimeError("REDIS_URL is required for worker startup")
+    return RedisSettings.from_dsn(settings.redis_url)
+
+
 async def send_dm_task(ctx, job_data: dict):
     """
     Kuyruktan cekilen gorev:
@@ -101,9 +107,7 @@ async def send_dm_task(ctx, job_data: dict):
 
 
 async def startup(ctx):
-    ctx["redis"] = await create_pool(
-        RedisSettings.from_dsn(settings.redis_url)
-    )
+    ctx["redis"] = await create_pool(require_redis_settings())
 
 
 async def shutdown(ctx):
@@ -111,7 +115,7 @@ async def shutdown(ctx):
 
 
 class WorkerSettings:
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    redis_settings = require_redis_settings()
     functions = [send_dm_task]
     on_startup = startup
     on_shutdown = shutdown
