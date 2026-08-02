@@ -35,6 +35,13 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
+    @field_validator("meta_app_secret", mode="before")
+    @classmethod
+    def normalize_meta_app_secret(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
     @field_validator("max_delay_seconds")
     @classmethod
     def validate_delays(cls, value, info):

@@ -13,19 +13,40 @@ logger = structlog.get_logger()
 app = FastAPI(title="Instagram Auto DM")
 
 
-def verify_signature(payload: bytes, signature: str) -> bool:
-    """X-Hub-Signature-256 basligini dogrular."""
-    print(f"Gelen Imza: {signature}")
-    print(f"Okunan Sifre Uzunlugu: {len(settings.meta_app_secret) if settings.meta_app_secret else 'BOS!'}")
-    if not signature.startswith("sha256="):
-        return False
-    expected = signature.split("=")[1]
-    digest = hmac.new(
-        settings.meta_app_secret.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(expected, digest)
+def verify_signature(
+    payload: bytes,
+    signature_256: str,
+    signature_legacy: str = "",
+) -> bool:
+    """Meta webhook imzasini ham SHA256 hem de legacy SHA1 ile dogrular."""
+    secret = settings.meta_app_secret.strip()
+
+    if signature_256.startswith("sha256="):
+        expected = signature_256.split("=", 1)[1].strip().lower()
+        digest = hmac.new(
+            secret.encode("utf-8"),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, digest)
+
+    if signature_legacy.startswith("sha1="):
+        expected = signature_legacy.split("=", 1)[1].strip().lower()
+        digest = hmac.new(
+            secret.encode("utf-8"),
+            payload,
+            hashlib.sha1,
+        ).hexdigest()
+        return hmac.compare_digest(expected, digest)
+
+    logger.warning(
+        "webhook_signature_header_missing_or_invalid",
+        has_sha256_header=bool(signature_256),
+        has_legacy_header=bool(signature_legacy),
+        payload_size=len(payload),
+        secret_length=len(secret),
+    )
+    return False
 
 
 @app.on_event("startup")
@@ -63,9 +84,16 @@ async def verify_webhook(
 async def receive_webhook(request: Request):
     """Meta'dan gelen webhook event'lerini isler."""
     body = await request.body()
-    signature = request.headers.get("X-Hub-Signature-256", "")
+    signature_256 = request.headers.get("X-Hub-Signature-256", "")
+    signature_legacy = request.headers.get("X-Hub-Signature", "")
 
-    if not verify_signature(body, signature):
+    if not verify_signature(body, signature_256, signature_legacy):
+        logger.warning(
+            "webhook_signature_verification_failed",
+            payload_size=len(body),
+            has_sha256_header=bool(signature_256),
+            has_legacy_header=bool(signature_legacy),
+        )
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     payload = json.loads(body)
