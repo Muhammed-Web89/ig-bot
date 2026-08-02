@@ -19,6 +19,81 @@ def require_redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.redis_url)
 
 
+def _build_reply_message(is_following: bool) -> tuple[str, str]:
+    if is_following:
+        return settings.content_message, "content"
+    return settings.welcome_message, "welcome"
+
+
+async def process_comment_job(comment, redis: Redis, *, add_delay: bool = True):
+    """Yorumu alir, takip durumunu kontrol eder ve private reply gonderir."""
+    if add_delay:
+        delay = random.randint(
+            settings.min_delay_seconds, settings.max_delay_seconds
+        )
+        logger.info(
+            "dm_delay_started",
+            user=comment.from_username,
+            delay=delay,
+            comment_id=comment.comment_id,
+        )
+        await asyncio.sleep(delay)
+
+    follower_cache = FollowerCache(redis)
+    client = MetaClient()
+
+    try:
+        is_following = await follower_cache.is_following(comment.from_id)
+
+        if not is_following:
+            logger.info(
+                "cache_miss_refreshing_followers",
+                user=comment.from_username,
+            )
+            await follower_cache.refresh()
+            is_following = await follower_cache.is_following(comment.from_id)
+
+        message, message_type = _build_reply_message(is_following)
+
+        if is_following:
+            logger.info("user_is_follower", user=comment.from_username)
+        else:
+            logger.info("user_is_not_follower", user=comment.from_username)
+
+        result = await client.send_private_reply(comment.comment_id, message)
+        logger.info(
+            "dm_sent",
+            user=comment.from_username,
+            comment_id=comment.comment_id,
+            message_type=message_type,
+        )
+        return result
+
+    except MetaRateLimitError as exc:
+        logger.error(
+            "rate_limit_hit",
+            user=comment.from_username,
+            error=str(exc),
+        )
+        raise
+    except MetaAPIError as exc:
+        logger.error(
+            "meta_api_error",
+            user=comment.from_username,
+            error=str(exc),
+        )
+        raise
+    except Exception:
+        logger.exception(
+            "unexpected_error",
+            user=comment.from_username,
+            comment_id=comment.comment_id,
+        )
+        raise
+    finally:
+        await client.close()
+
+
 async def send_dm_task(ctx, job_data: dict):
     """
     Kuyruktan cekilen gorev:
@@ -31,79 +106,18 @@ async def send_dm_task(ctx, job_data: dict):
     comment = job.comment
     redis: Redis = ctx["redis"]
 
-    # Anti-spam: her DM gonderiminden once rastgele bekleme
-    delay = random.randint(
-        settings.min_delay_seconds, settings.max_delay_seconds
-    )
-    logger.info(
-        "dm_delay_started",
-        user=comment.from_username,
-        delay=delay,
-        comment_id=comment.comment_id,
-        attempt=job.attempt,
-    )
-    await asyncio.sleep(delay)
-
-    follower_cache = FollowerCache(redis)
-    client = MetaClient()
-
     try:
-        # 1. Once cache'e bak
-        is_following = await follower_cache.is_following(comment.from_id)
-
-        # Cache miss olursa takipci listesini guncelle (kucuk hesaplarda)
-        if not is_following:
-            logger.info(
-                "cache_miss_refreshing_followers",
-                user=comment.from_username,
-            )
-            await follower_cache.refresh()
-            is_following = await follower_cache.is_following(comment.from_id)
-
-        # 2. Mesaji belirle
-        if is_following:
-            message = settings.content_message
-            logger.info("user_is_follower", user=comment.from_username)
-        else:
-            message = settings.welcome_message
-            logger.info("user_is_not_follower", user=comment.from_username)
-
-        # 3. Private Reply ile DM gonder
-        result = await client.send_private_reply(comment.comment_id, message)
-        logger.info(
-            "dm_sent",
-            user=comment.from_username,
-            comment_id=comment.comment_id,
-            message_type="content" if is_following else "welcome",
-        )
+        result = await process_comment_job(comment, redis, add_delay=True)
         return result
 
     except MetaRateLimitError as exc:
-        logger.error(
-            "rate_limit_hit",
-            user=comment.from_username,
-            error=str(exc),
-        )
         if job.attempt < 5:
             await redis.enqueue_job(
                 "send_dm_task",
                 job.model_copy(update={"attempt": job.attempt + 1}).model_dump(),
                 defer_by_seconds=60 * job.attempt,
             )
-    except MetaAPIError as exc:
-        logger.error(
-            "meta_api_error",
-            user=comment.from_username,
-            error=str(exc),
-        )
-    except Exception:
-        logger.exception(
-            "unexpected_error",
-            user=comment.from_username,
-            comment_id=comment.comment_id,
-        )
-    finally:
-        await client.close()
+        return None
 
 
 async def startup(ctx):

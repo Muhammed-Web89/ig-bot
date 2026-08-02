@@ -8,7 +8,8 @@ from arq import create_pool
 from arq.connections import RedisSettings
 
 from app.config import settings
-from app.models import InstagramComment, DMJob
+from app.models import InstagramComment
+from app.workers import process_comment_job
 
 logger = structlog.get_logger()
 app = FastAPI(title="Instagram Auto DM")
@@ -79,7 +80,7 @@ def verify_signature(
 @app.on_event("startup")
 async def startup():
     if not settings.redis_url:
-        raise RuntimeError("REDIS_URL is required for webhook queue processing")
+        raise RuntimeError("REDIS_URL is required for webhook processing")
     app.state.redis = await create_pool(
         RedisSettings.from_dsn(settings.redis_url)
     )
@@ -148,12 +149,9 @@ async def receive_webhook(request: Request):
                 text=value.get("comment_text", ""),
             )
 
-            await app.state.redis.enqueue_job(
-                "send_dm_task",
-                DMJob(comment=comment).model_dump(),
-            )
+            await process_comment_job(comment, app.state.redis, add_delay=False)
             logger.info(
-                "dm_job_enqueued",
+                "dm_job_processed",
                 user=comment.from_username,
                 comment_id=comment.comment_id,
             )
