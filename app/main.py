@@ -3,6 +3,7 @@ import hashlib
 import json
 import structlog
 from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from arq import create_pool
 from arq.connections import RedisSettings
 
@@ -163,3 +164,13 @@ async def receive_webhook(request: Request):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy():
+    return """
+    <h1>Privacy Policy - Otomasyon cevaplama</h1>
+    <p>This app automates Instagram DM responses for Altis Global. We do not store personal data.
+    Data is used only to reply to user comments and messages.</p>
+    <p>Contact: info@altisglobal.com.tr</p>
+    """
