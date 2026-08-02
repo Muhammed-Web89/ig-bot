@@ -13,6 +13,12 @@ logger = structlog.get_logger()
 app = FastAPI(title="Instagram Auto DM")
 
 
+def _fingerprint(value: bytes | str, length: int = 12) -> str:
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha256(value).hexdigest()[:length]
+
+
 def verify_signature(
     payload: bytes,
     signature_256: str,
@@ -20,6 +26,8 @@ def verify_signature(
 ) -> bool:
     """Meta webhook imzasini ham SHA256 hem de legacy SHA1 ile dogrular."""
     secret = settings.meta_app_secret.strip()
+    secret_fingerprint = _fingerprint(secret)
+    payload_fingerprint = _fingerprint(payload)
 
     if signature_256.startswith("sha256="):
         expected = signature_256.split("=", 1)[1].strip().lower()
@@ -28,6 +36,14 @@ def verify_signature(
             payload,
             hashlib.sha256,
         ).hexdigest()
+        logger.warning(
+            "webhook_signature_check_sha256",
+            secret_fingerprint=secret_fingerprint,
+            payload_fingerprint=payload_fingerprint,
+            received_prefix=expected[:12],
+            expected_prefix=digest[:12],
+            match=hmac.compare_digest(expected, digest),
+        )
         return hmac.compare_digest(expected, digest)
 
     if signature_legacy.startswith("sha1="):
@@ -37,6 +53,14 @@ def verify_signature(
             payload,
             hashlib.sha1,
         ).hexdigest()
+        logger.warning(
+            "webhook_signature_check_sha1",
+            secret_fingerprint=secret_fingerprint,
+            payload_fingerprint=payload_fingerprint,
+            received_prefix=expected[:12],
+            expected_prefix=digest[:12],
+            match=hmac.compare_digest(expected, digest),
+        )
         return hmac.compare_digest(expected, digest)
 
     logger.warning(
@@ -45,6 +69,8 @@ def verify_signature(
         has_legacy_header=bool(signature_legacy),
         payload_size=len(payload),
         secret_length=len(secret),
+        secret_fingerprint=secret_fingerprint,
+        payload_fingerprint=payload_fingerprint,
     )
     return False
 
@@ -93,6 +119,8 @@ async def receive_webhook(request: Request):
             payload_size=len(body),
             has_sha256_header=bool(signature_256),
             has_legacy_header=bool(signature_legacy),
+            secret_fingerprint=_fingerprint(settings.meta_app_secret.strip()),
+            payload_fingerprint=_fingerprint(body),
         )
         raise HTTPException(status_code=403, detail="Invalid signature")
 
