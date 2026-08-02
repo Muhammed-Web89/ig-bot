@@ -137,16 +137,19 @@ async def receive_webhook(request: Request):
             if item != "comment":
                 continue
 
-            comment_text = value.get("comment_text", "").upper()
-            if not any(kw.upper() in comment_text for kw in settings.keywords):
-                continue
-
             comment = InstagramComment(
                 comment_id=str(value.get("comment_id")),
                 media_id=str(value.get("media_id")),
                 from_id=str(value.get("from", {}).get("id")),
                 from_username=value.get("from", {}).get("username"),
                 text=value.get("comment_text", ""),
+            )
+
+            logger.info(
+                "comment_triggered_for_dm",
+                user=comment.from_username,
+                comment_id=comment.comment_id,
+                comment_text=comment.text,
             )
 
             await process_comment_job(comment, app.state.redis, add_delay=False)
