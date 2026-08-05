@@ -9,6 +9,7 @@ from arq.connections import RedisSettings
 
 from app.config import settings
 from app.models import InstagramComment
+from app.meta_client import MetaAPIError, MetaRateLimitError
 from app.workers import process_comment_job
 
 logger = structlog.get_logger()
@@ -144,15 +145,20 @@ async def receive_webhook(request: Request):
                 from_id=value.get("from", {}).get("id"),
             )
 
-            if item not in {"comment", "comments"} and not value.get("comment_id"):
+            if item not in {"comment", "comments"} and not value.get("id"):
                 continue
 
+            comment_id = value.get("comment_id") or value.get("id")
+            media_id = value.get("media_id") or value.get("media")
+            comment_text = value.get("comment_text") or value.get("text") or ""
+            from_data = value.get("from") or {}
+
             comment = InstagramComment(
-                comment_id=str(value.get("comment_id")),
-                media_id=str(value.get("media_id")),
-                from_id=str(value.get("from", {}).get("id")),
-                from_username=value.get("from", {}).get("username"),
-                text=value.get("comment_text", ""),
+                comment_id=str(comment_id),
+                media_id=str(media_id),
+                from_id=str(from_data.get("id") or value.get("from_id") or ""),
+                from_username=from_data.get("username") or value.get("from_username"),
+                text=comment_text,
             )
 
             logger.info(
@@ -162,12 +168,33 @@ async def receive_webhook(request: Request):
                 comment_text=comment.text,
             )
 
-            await process_comment_job(comment, app.state.redis, add_delay=False)
-            logger.info(
-                "dm_job_processed",
-                user=comment.from_username,
-                comment_id=comment.comment_id,
-            )
+            try:
+                await process_comment_job(comment, app.state.redis, add_delay=False)
+                logger.info(
+                    "dm_job_processed",
+                    user=comment.from_username,
+                    comment_id=comment.comment_id,
+                )
+            except MetaRateLimitError as exc:
+                logger.error(
+                    "dm_rate_limited",
+                    user=comment.from_username,
+                    comment_id=comment.comment_id,
+                    error=str(exc),
+                )
+            except MetaAPIError as exc:
+                logger.error(
+                    "dm_api_error",
+                    user=comment.from_username,
+                    comment_id=comment.comment_id,
+                    error=str(exc),
+                )
+            except Exception:
+                logger.exception(
+                    "dm_dispatch_failed",
+                    user=comment.from_username,
+                    comment_id=comment.comment_id,
+                )
 
     return {"status": "ok"}
 
