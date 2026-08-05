@@ -134,7 +134,17 @@ async def receive_webhook(request: Request):
             value = change.get("value", {})
             item = value.get("item")
 
-            if item != "comment":
+            logger.info(
+                "webhook_change_received",
+                field=change.get("field"),
+                item=item,
+                value_keys=sorted(list(value.keys())),
+                comment_id=value.get("comment_id"),
+                media_id=value.get("media_id"),
+                from_id=value.get("from", {}).get("id"),
+            )
+
+            if item not in {"comment", "comments"} and not value.get("comment_id"):
                 continue
 
             comment = InstagramComment(
