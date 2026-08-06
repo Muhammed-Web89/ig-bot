@@ -1,5 +1,3 @@
-import hmac
-import hashlib
 import httpx
 import structlog
 from tenacity import (
@@ -38,15 +36,6 @@ class MetaClient:
             headers={"Accept": "application/json"},
         )
 
-    def generate_appsecret_proof(self) -> str:
-        """App Secret Proof uretir (token guvenligi icin onerilir)."""
-        digest = hmac.new(
-            settings.meta_app_secret.encode(),
-            self.access_token.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        return digest
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=2, max=30),
@@ -56,7 +45,6 @@ class MetaClient:
     async def _post(self, path: str, payload: dict) -> dict:
         params = {
             "access_token": self.access_token,
-            "appsecret_proof": self.generate_appsecret_proof(),
         }
         response = await self.client.post(path, params=params, json=payload)
 
@@ -119,7 +107,6 @@ class MetaClient:
         url = f"/{settings.instagram_account_id}/followers"
         params = {
             "access_token": self.access_token,
-            "appsecret_proof": self.generate_appsecret_proof(),
             "fields": fields,
             "limit": 100,
         }
